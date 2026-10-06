@@ -1,0 +1,236 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./devflow.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id             String               @id @default(uuid())
+  email          String               @unique
+  passwordHash   String
+  name           String
+  avatarUrl      String?
+  githubUsername String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  refreshTokens  RefreshToken[]
+  orgMemberships OrganizationMember[]
+  projectMembers ProjectMember[]
+  reportedIssues Issue[]              @relation("ReportedIssues")
+  assignedIssues Issue[]              @relation("AssignedIssues")
+  comments       Comment[]
+  activityLogs   ActivityLog[]        @relation("ActorActivity")
+  notifications  Notification[]       @relation("UserNotifications")
+  actedNotifications Notification[]  @relation("ActorNotifications")
+
+  @@index([email])
+}
+
+model RefreshToken {
+  id               String    @id @default(uuid())
+  tokenHash        String    @unique
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  replacesTokenId  String?
+  createdAt        DateTime  @default(now())
+  userAgent        String?
+  ipAddress        String?
+
+  @@index([userId])
+}
+
+model Organization {
+  id          String               @id @default(uuid())
+  name        String
+  slug        String               @unique
+  logoUrl     String?
+  ownerId     String
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  members     OrganizationMember[]
+  projects    Project[]
+  labels      Label[]
+  activityLogs ActivityLog[]
+
+  @@index([slug])
+}
+
+model OrganizationMember {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String       @default("MEMBER") // OWNER, ADMIN, MEMBER
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+model Project {
+  id             String             @id @default(uuid())
+  name           String
+  key            String             // e.g. "DEV"
+  description    String?
+  status         String             @default("ACTIVE") // ACTIVE, ARCHIVED
+  organizationId String
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ownerId        String
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  members        ProjectMember[]
+  issues         Issue[]
+  activityLogs   ActivityLog[]
+  githubIntegration GitHubIntegration?
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
+}
+
+model ProjectMember {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String   @default("DEVELOPER") // LEAD, DEVELOPER, VIEWER
+  createdAt DateTime @default(now())
+
+  @@unique([projectId, userId])
+  @@index([projectId])
+  @@index([userId])
+}
+
+model Issue {
+  id          String        @id @default(uuid())
+  issueKey    String        @unique // e.g. "DEV-101"
+  issueNumber Int
+  title       String
+  description String?
+  status      String        @default("BACKLOG") // BACKLOG, TODO, IN_PROGRESS, IN_REVIEW, DONE
+  priority    String        @default("MEDIUM")  // LOW, MEDIUM, HIGH, CRITICAL
+  type        String        @default("TASK")    // BUG, FEATURE, TASK, IMPROVEMENT
+  position    Float         @default(65535)
+  dueDate     DateTime?
+
+  projectId   String
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  reporterId  String
+  reporter    User          @relation("ReportedIssues", fields: [reporterId], references: [id])
+
+  assigneeId  String?
+  assignee    User?         @relation("AssignedIssues", fields: [assigneeId], references: [id])
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  comments    Comment[]
+  labels      IssueLabel[]
+  activityLogs ActivityLog[]
+
+  @@unique([projectId, issueNumber])
+  @@index([projectId])
+  @@index([status])
+  @@index([assigneeId])
+}
+
+model Label {
+  id             String       @id @default(uuid())
+  name           String
+  color          String       @default("#6366f1")
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  issues         IssueLabel[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model IssueLabel {
+  issueId String
+  issue   Issue  @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  labelId String
+  label   Label  @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([issueId, labelId])
+  @@index([issueId])
+  @@index([labelId])
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  content   String
+  issueId   String
+  issue     Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([issueId])
+}
+
+model ActivityLog {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  projectId      String?
+  project        Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  issueId        String?
+  issue          Issue?       @relation(fields: [issueId], references: [id], onDelete: SetNull)
+  actorId        String
+  actor          User         @relation("ActorActivity", fields: [actorId], references: [id], onDelete: Cascade)
+
+  action         String
+  details        String
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+  @@index([projectId])
+  @@index([issueId])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  actorId   String?
+  actor     User?    @relation("ActorNotifications", fields: [actorId], references: [id], onDelete: SetNull)
+  type      String   // ASSIGNMENT, MENTION, COMMENT, STATUS_CHANGE, PROJECT_INVITE
+  title     String
+  message   String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+}
+
+model GitHubIntegration {
+  id             String    @id @default(uuid())
+  projectId      String    @unique
+  project        Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryName String
+  repositoryUrl  String
+  githubRepoId   String?
+  webhookSecret  String?
+  accessToken    String?
+  isConnected    Boolean   @default(true)
+  connectedAt    DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
